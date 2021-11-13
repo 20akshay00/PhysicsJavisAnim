@@ -9,9 +9,13 @@ begin
 	using Javis, LaTeXStrings, Animations, StatsBase, LinearAlgebra
 end
 
-# ╔═╡ a4dd1e42-26ed-45b4-9256-0ad45607ac3e
+# ╔═╡ c61fb425-4541-48b5-8980-7d3addaed9f7
 md"""
-### Work in Progress!
+#### Setting up the structures and methods for the simulation
+
+We represent 2D vectors as complex numbers, and convert them back to Points in the end. A simple Euler integration scheme is utilized to update the positions of the Balls.
+
+---
 """
 
 # ╔═╡ 6aedcca8-6245-4f2b-9058-ddb90eb594b5
@@ -53,76 +57,78 @@ begin
 		b.force = 0. + 0im
 	end
 	
+	
+	# Helper functions for conversions
 	function complexToCoord(c::ComplexF64)
 		return [real(c), imag(c)]
 	end
+	
+	function coordToPoint(c)
+		return Point(c...)	
+	end
 end
+
+# ╔═╡ 740fc7a5-691f-430f-a5e5-7e2e5fcc50ed
+md"""
+#### Simulation driver code
+This puts together all the pieces we have built above.
+
+---
+"""
 
 # ╔═╡ 3c41403e-71d4-4b7f-b816-a7559842858f
-begin
-	function sim(balls::Vector{Ball}, springs::Vector{Spring}, nsteps, dt, nskip)
-		
-		traj = accumulate(1:nsteps, init = 0) do _, _
-			
-			applyForce.(springs)
-			update.(balls, [dt])
-			
-			complexToCoord.(getproperty.(balls, :pos))
-		end
-		
-		return traj[1:nskip:end]
+function simulate(balls::Vector{Ball}, springs::Vector{Spring}, nsteps, dt, nskip)
+
+	traj = map(1:nsteps) do _
+
+		applyForce.(springs)
+		update.(balls, [dt])
+
+		complexToCoord.(getproperty.(balls, :pos))
 	end
+
+	return traj[1:nskip:end]
 end
 
-# ╔═╡ a468b933-09bb-4c34-8c9b-ee437eea54e8
-begin
-	balls = [Ball(-15. + 0im, Inf, 10., true), Ball(-7.5 - 0im, 1., 10.), Ball(0. -5im, 1., 10.), Ball(7.5 + 0im, 1., 10.), Ball(15. + 0im, Inf, 10., true)]
-	springs = Spring.(balls[1:end-1], balls[2:end], [5.], [7.5])
-	
-	t = sim(balls, springs, 5000, 0.01, 20)
-end
+# ╔═╡ 3de52e2e-38eb-4a9f-9d7c-25143dea381b
+md"""
+#### Helper functions for drawing in Javis
+---
+"""
 
 # ╔═╡ fcfd822d-0ddb-4355-9047-395ff9d09c8d
-function draw_spring(A, B, num_peaks, width, gap, col)
-	
-	if(A.x > B.x)
-		A, B = B, A
+begin 
+	function draw_spring(A, B, num_peaks, width, gap, col)
+
+		if(A.x > B.x)
+			A, B = B, A
+		end
+
+		d, θ = LinearAlgebra.norm(B - A), π/2 - atan((B-A)...)
+		Δx = (d - 2*gap)/num_peaks
+
+		xs = vcat([0, gap], gap .+ Δx/2 .+ Δx .* (0:(num_peaks-1)), [gap + num_peaks*Δx, 2*gap + num_peaks*Δx])
+
+		ys = width * vcat([0, 0], (-1).^(0:(num_peaks-1)), [0, 0])
+
+		points = Point.(xs, ys)  	
+
+		translate(A)
+		rotate(θ)
+
+		sethue(col)
+		line.(points[1:end-1], points[2:end], :stroke)
+
+		rotate(-θ)
+		translate(-A)
+
 	end
-	
-	d, θ = LinearAlgebra.norm(B - A), π/2 - atan((B-A)...)
-	Δx = (d - 2*gap)/num_peaks
-	
-	xs = vcat([0, gap], gap .+ Δx/2 .+ Δx .* (0:(num_peaks-1)), [gap + num_peaks*Δx, 2*gap + num_peaks*Δx])
-	
-	ys = width * vcat([0, 0], (-1).^(0:(num_peaks-1)), [0, 0])
-	
-	points = Point.(xs, ys)  	
-	
-	translate(A)
-	rotate(θ)
 
-	sethue(col)
-	line.(points[1:end-1], points[2:end], :stroke)
-
-	rotate(-θ)
-	translate(-A)
-
-end
-
-# ╔═╡ 578e774f-c3bc-4a3a-a167-d32bdeb2dc14
-let
 	function ground(args...)
 	    background("black")
 	    sethue("white")
 	end
-	
-	function draw_line(p1 = O, p2 = O, color = "black", action = :stroke, edge = "solid")
-	    sethue(color)
-	    setdash(edge)
-		setline(1)
-	    line(p1, p2, action)
-	end
-	
+
 	function circ(p = O, alph = 1.0, action = :fill, radius = 25, edge = "solid", isAnchor = false)
 		
 	    if(!isAnchor)
@@ -135,44 +141,190 @@ let
 		
 		return p
 	end
-	
-	function coordToPoint(c)
-		return Point(c...)	
-	end
-	
-	nframes = length(t)
-		
-	myvideo = Video(350, 100)
+
+end
+
+# ╔═╡ cc1ce4e6-7ccc-4923-a05c-6ca3c237eb9c
+md"""
+#### Javis code for animating the trajectories
+
+---
+"""
+
+# ╔═╡ 578e774f-c3bc-4a3a-a167-d32bdeb2dc14
+function drawSimulation(traj, phys_balls, sim_length, r = 10, springC = 15)
+
+	nframes = length(traj)
+
+	myvideo = Video(12 * sim_length, 150)
 	Background(1:nframes, ground)
-	
-	r = 10
-	num_balls = size(t[1])[1]
-	bpath = [coordToPoint.(reshape(reduce(vcat, t), length(t[1]), length(t))[i, :]) for i in 1:num_balls]
-	
+
+	#get the number of balls
+	num_balls = size(traj[1])[1]
+
+	#create Javis.Point paths for each ball
+	bpath = [coordToPoint.(
+			reshape(reduce(vcat, traj), length(traj[1]), length(traj))[i, :]) 
+			for i in 1:num_balls]
+
+	#create javis animations for each ball
 	banim = Animation.(
 				[range(0, stop = 1, length = nframes)],
-			    10 .* bpath,
+				10 .* bpath, #scaled by 10
 				[linear()])
-	
 
-	l1 = @JLayer 1:nframes begin
-		ball = [Object(1:nframes, (args...) -> circ(O, 0.9, :fill, r, "solid", balls[i].isAnchor), bpath[i][1]) for i in 1:num_balls]
-	
+
+	#layer to draw the balls
+	balls_layer = @JLayer 1:nframes begin
+		balls = [Object(
+				1:nframes, 
+				(args...) -> circ(O, 0.9, :fill, r, "solid", phys_balls[i].isAnchor), 					 bpath[i][1]) 
+				for i in 1:num_balls]
+
 		for i in 1:num_balls
-			act!(ball[i], Action(1:nframes, banim[i], translate()))
+			act!(balls[i], Action(1:nframes, banim[i], translate()))
 		end
-		
+
 	end
 
-	l2 = @JLayer 1:nframes begin
-    	Object(1:nframes, (args...)->draw_spring.(pos.(ball[1:end-1]), pos.(ball[2:end]), 30, r/2, r, "white"))
+	#layer to draw the springs
+	spring_layer = @JLayer 1:nframes begin
+		Object(
+			1:nframes, 
+			(args...) -> draw_spring.(pos.(balls[1:end-1]), pos.(balls[2:end]), 				springC, r/2, r, "white"))
+	end
+
+	render(myvideo; pathname="SHM.gif")
 end
 
-	render(
-    myvideo;
-    pathname="SHM.gif")
+# ╔═╡ 5de82aea-7ade-4ea8-956e-2f31f85c1edc
+md"""
+#### Results!
+
+---
+"""
+
+# ╔═╡ 5c353642-d417-40fe-8c3d-17b99ca5c999
+md"""
+We can now specify the properties and initial conditions/connections of any number of balls and springs, and let our code do the work! One neat trick is that we can also have "Anchor" points by setting the mass of the ball to "Inf", which Julia smartly recognizes and replaces computations such as 1/Inf by 0 which works to our benefit (an infinitely large mass can never be accelerated!).
+"""
+
+# ╔═╡ 0e82cf58-8fb8-4c11-94c9-74b16409aa55
+md"""
+##### A sanity check
+
+Since we're using a naive Euler scheme, there is bound to be some numerical error, but we must make sure the results are atleast remotely physical. So we choose a simple normal mode (longitudinal) oscillation for starters:
+"""
+
+# ╔═╡ a468b933-09bb-4c34-8c9b-ee437eea54e8
+let
+	springC, l, n = 15, 40, 10
+	d = l/(n+1)
 	
+	balls = [Ball(-15. + 0im, Inf, 10., true), Ball(-7.5 + 1.0 + 0im, 1., 10.), Ball(0. + 0im, 1., 10.), Ball(7.5 - 1.0 + 0im, 1., 10.), Ball(15. + 0im, Inf, 10., true)]
+	springs = Spring.(balls[1:end-1], balls[2:end], [5.], [7.5])
+	
+	t = simulate(balls, springs, 5000, 0.01, 20)
+	drawSimulation(t, balls, l, 10)
 end
+
+# ╔═╡ 1735cfa9-1f01-40b3-9af7-848642b80024
+md"""
+It works like a charm! Let us now try a transverse normal mode:
+"""
+
+# ╔═╡ ac65b6e9-f929-4649-af38-a6ab8e73c8c4
+let
+	springC, l, n = 15, 40, 10
+	d = l/(n+1)
+	
+	balls = [Ball(-15. + 0im, Inf, 10., true), Ball(-7.5 + 5im, 1., 10.), Ball(0. + 0im, 1., 10.), Ball(7.5 - 5im, 1., 10.), Ball(15. + 0im, Inf, 10., true)]
+	springs = Spring.(balls[1:end-1], balls[2:end], [5.], [7.5])
+	
+	t = simulate(balls, springs, 5000, 0.01, 20)
+	drawSimulation(t, balls, l, 10)
+end
+
+# ╔═╡ cae02167-b25a-421d-9770-f905f28726ca
+md"""
+Perfect! The possibilities are now endless; our setup is general enough such that we can create any configuration of balls and springs (with a primitive collision system, we can even produce naive soft body simulations).
+"""
+
+# ╔═╡ 776f5b35-7dcf-4f47-b667-0e4edcadaccb
+md"""
+#### N-coupled oscillators: The continuum limit
+
+This provides us an opportunity to extend our system to a large number of balls and see whether the oscillations behave similar to the continuum limit, namely waves on a string (A detailed exposition can be found in "Vibrations and Waves
+Book by Anthony French"). 
+
+Let us now simulate this with appropriate initial position (lying on the outline of a sinusoidal wave):
+"""
+
+# ╔═╡ be32fd2a-7f52-42e2-91e8-036933b1eea3
+let	
+	springC = 15
+	
+	l = 200
+	n = 29
+	d = l/(n+1)
+	
+	xs = collect(-(l/2 - d):d:(l/2 - d))
+	ys = 5 .* repeat([-1, 0, 1, 0], n÷4 + 1)[1:end-(4 - n%4)]
+
+	# ys = zeros(n)
+	# ys = 1 .* sin.(1*(((π/l) .* xs) .+ π/2))	
+	# ys = 5 .* repeat([-1, 1], n÷2 + 1)[1:end-(2 - n%2)]
+	
+	balls = [Ball(-l/2 + 0im, Inf, 10., true)]
+	balls = vcat(balls, [Ball(xs[i] + ys[i]*im, 1., 10.) for i in 1:n])
+	balls = vcat(balls, [Ball(l/2 + 0im, Inf, 10., true)])
+	
+	springs = Spring.(balls[1:end-1], balls[2:end], [2000.], [d])
+	
+	t = simulate(balls, springs, 5000, 0.001, 10)
+	drawSimulation(t, balls, l, 10)
+end
+
+# ╔═╡ b2eb6927-3c43-4f29-8531-9380a6fba323
+md"""
+This is nothing surprising; it is one of the higher frequency modes and resembles a poorly sampled sinusoid. Let us attempt a lower frequency mode:
+"""
+
+# ╔═╡ 0493a01e-1ec6-4c70-8173-80a629dc8fce
+let	
+	springC = 15
+	
+	l = 200
+	n = 29
+	d = l/(n+1)
+	
+	xs = collect(-(l/2 - d):d:(l/2 - d))
+	# ys = zeros(n)
+	ys = 3 .* sin.(4*(((π/l) .* xs) .+ π/2))	
+	
+	# ys = 5 .* repeat([-1, 0, 1, 0], n÷4 + 1)[1:end-(4 - n%4)]
+	# ys = 5 .* repeat([-1, 1], n÷2 + 1)[1:end-(2 - n%2)]
+	
+	balls = [Ball(-l/2 + 0im, Inf, 10., true)]
+	balls = vcat(balls, [Ball(xs[i] + ys[i]*im, 1., 10.) for i in 1:n])
+	balls = vcat(balls, [Ball(l/2 + 0im, Inf, 10., true)])
+	
+	springs = Spring.(balls[1:end-1], balls[2:end], [2000.], [d])
+	
+	t = simulate(balls, springs, 20000, 0.001, 50)
+	drawSimulation(t, balls, l, 10)
+end
+
+# ╔═╡ 955e4177-ffb2-4e6e-98b5-f884937de86d
+md"""
+Now that is a wonderful sight to see! Much more reminiscent of a standing wave on a string! There are some things to note though;
+
+- Changing the frame rates, and number of timesteps utilized from the trajectory will alter the frequency of oscillations in real-time. I have tweaked each animation so it looks good to our eye, but the actual frequencies can be rather slow or fast based on the number of balls and the specific normal mode they're in, as expected from the actual physical system.
+
+- A keen-eyed observer may notice some tiny disturbances propagating through the wave, in specific scenarios. These may be due to numerical errors, or simply due to the fact that since springs are utilized (which roughly behave as strings for a large force constant), the forces are not constrained to being vertical, so some high frequency horizontal jiggling occasionally creeps in. 
+
+---
+"""
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1505,11 +1657,25 @@ version = "0.9.1+5"
 
 # ╔═╡ Cell order:
 # ╠═607c2d20-42b4-11ec-2009-2fa24d300454
-# ╟─a4dd1e42-26ed-45b4-9256-0ad45607ac3e
+# ╟─c61fb425-4541-48b5-8980-7d3addaed9f7
 # ╠═6aedcca8-6245-4f2b-9058-ddb90eb594b5
+# ╟─740fc7a5-691f-430f-a5e5-7e2e5fcc50ed
 # ╠═3c41403e-71d4-4b7f-b816-a7559842858f
-# ╠═a468b933-09bb-4c34-8c9b-ee437eea54e8
+# ╟─3de52e2e-38eb-4a9f-9d7c-25143dea381b
+# ╠═fcfd822d-0ddb-4355-9047-395ff9d09c8d
+# ╟─cc1ce4e6-7ccc-4923-a05c-6ca3c237eb9c
 # ╠═578e774f-c3bc-4a3a-a167-d32bdeb2dc14
-# ╟─fcfd822d-0ddb-4355-9047-395ff9d09c8d
+# ╟─5de82aea-7ade-4ea8-956e-2f31f85c1edc
+# ╟─5c353642-d417-40fe-8c3d-17b99ca5c999
+# ╟─0e82cf58-8fb8-4c11-94c9-74b16409aa55
+# ╠═a468b933-09bb-4c34-8c9b-ee437eea54e8
+# ╟─1735cfa9-1f01-40b3-9af7-848642b80024
+# ╠═ac65b6e9-f929-4649-af38-a6ab8e73c8c4
+# ╟─cae02167-b25a-421d-9770-f905f28726ca
+# ╟─776f5b35-7dcf-4f47-b667-0e4edcadaccb
+# ╠═be32fd2a-7f52-42e2-91e8-036933b1eea3
+# ╟─b2eb6927-3c43-4f29-8531-9380a6fba323
+# ╟─0493a01e-1ec6-4c70-8173-80a629dc8fce
+# ╟─955e4177-ffb2-4e6e-98b5-f884937de86d
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
